@@ -18,6 +18,7 @@ contract Survive is  Withdrawable, Pausable, Refundable {
     uint cureFee;
     uint killTime;
     uint cooldown;
+    uint roundBalance;
 
     struct Player {
         address owner;
@@ -49,8 +50,10 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         require(msg.value >= entryFee);
         uint balance = msg.value.sub(entryFee);
         playerAddresses.push(msg.sender);
-        playerMap[msg.sender] = Player(msg.sender, true, false, 0,  0, balance, true);
-        emit playerJoinedEvent(playerMap[msg.sender].owner, now, balance);
+        playerMap[msg.sender] = Player(msg.sender, true, false, 0, 0, 0, true);
+        _updateBalance(msg.sender, balance, true);
+        _updateRoundBalance(entryFee, true);
+        emit playerJoinedEvent(msg.sender, now, balance);
         return true;
     }
 
@@ -67,18 +70,19 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         return _kill(_ownerAddress);
     }
 
-    function settleGame(bool _forceKillInfectedPlayers) public isNotPaused() isOwner() returns (uint _prize) {
+    function settleGame(bool _forceKillInfectedPlayers, bool _reset) public isNotPaused() isOwner() returns (uint _prize) {
         uint prize = 0;
         address winner = address(0);
-        uint alive = getAliveCount();
-        uint prizeBalance = address(this).balance;
+        uint prizeBalance = roundBalance;
 
         if (_forceKillInfectedPlayers) {
             _killInfectedPlayers(true);
         }
 
-        if (address(this).balance >= entryFee.mul(2)) {
-            prize = prizeBalance.div(alive+1); //survive game contract keeps the equivalent of 1 entry fee for processing
+        uint alive = getAliveCount();
+
+        if (roundBalance >= entryFee.mul(2) && address(this).balance >= roundBalance) {
+            prize = prizeBalance.sub(entryFee).div(alive); //survive game contract keeps the equivalent of 1 entry fee for processing
             for (uint i=0; i<playerAddresses.length; i++)  {
                 if (playerMap[playerAddresses[i]].isAlive==true)  {
                     playerMap[playerAddresses[i]].owner.transfer(prize);
@@ -86,10 +90,14 @@ contract Survive is  Withdrawable, Pausable, Refundable {
                     emit playerAwardedEvent(playerMap[playerAddresses[i]].owner, prize);
                 }
             }
+            _updateRoundBalance(prizeBalance, false);
         }
+
         emit gameSettledEvent(alive, prize, address(this).balance);
 
-        reset();
+        if (_reset) {
+            reset();
+        }
 
         return prize;
     }
@@ -103,8 +111,8 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         return ( playerMap[_ownerAddress].owner, playerMap[_ownerAddress].isAlive, playerMap[_ownerAddress].isInfected, playerMap[_ownerAddress].infectedTime, playerMap[_ownerAddress].immuneTime,  playerMap[_ownerAddress].balance,  playerMap[_ownerAddress].initialized  );
     }
 
-    function getGameData() public view returns (uint _entryFee, uint _cureFee, uint _killTime, uint _cooldown){
-        return (entryFee, cureFee, killTime, cooldown);
+    function getGameData() public view returns (uint _entryFee, uint _cureFee, uint _roundBalance, uint _killTime, uint _cooldown){
+        return (entryFee, cureFee, roundBalance, killTime, cooldown);
     }
 
     function getInfectedCount() public view returns (uint _infectedCount) {
@@ -136,7 +144,6 @@ contract Survive is  Withdrawable, Pausable, Refundable {
     }
 
     function getPlayerByIndex(uint index) public isOwner() view returns ( address _owner, bool _isAlive, bool _isInfected, uint _infectedTime, uint _immuneTime, uint _balance, bool _initialized ) {
-
         return getPlayer(playerAddresses[index]);
     }
 
@@ -163,6 +170,16 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         }
 
         emit playerBalanceUpdatedEvent(playerMap[_ownerAddress].owner, playerMap[_ownerAddress].balance);
+    }
+
+    function _updateRoundBalance(uint amount, bool add) internal {
+        if (add) {
+            roundBalance =  roundBalance.add(amount);
+        }
+        else {
+            roundBalance = roundBalance.sub(amount);
+        }
+        emit roundBalanceEvent(now, roundBalance, amount, add);
     }
 
     function _reentry(address _ownerAddress, uint amount) internal returns (address _owner, bool _isAlive, bool _isInfected, uint _infectedTime, uint _immuneTime, uint _balance, bool _initialized) {
@@ -205,10 +222,6 @@ contract Survive is  Withdrawable, Pausable, Refundable {
             infected = true;
         }
 
-        if ( playerMap[_owner].balance > cureFee ) {
-            _cure(playerMap[_owner].owner, 0);
-        }
-
         uint count = getInfectedCount();
 
         _killInfectedPlayers(false);
@@ -227,8 +240,7 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         return playerMap[_ownerAddress].owner;
     }
 
-    function _killInfectedPlayers(bool force) internal returns (uint _aliveCount)
-    {
+    function _killInfectedPlayers(bool force) internal returns (uint _aliveCount){
         for (uint i=0; i<playerAddresses.length; i++)  {
             address owner = playerAddresses[i];
             if ( (playerMap[owner].isInfected && playerMap[owner].infectedTime + killTime <= now) || (playerMap[owner].isInfected && force==true)) {
@@ -239,14 +251,14 @@ contract Survive is  Withdrawable, Pausable, Refundable {
         return getAliveCount();
     }
 
-    function reset() internal returns (bool _reset)
-    {
+    function reset() internal returns (bool _reset){
         for (uint i=0; i<playerAddresses.length; i++)  {
             address owner = playerAddresses[i];
 
             if (playerMap[owner].balance >= entryFee) {
                 playerMap[owner].isAlive = true;
                 _updateBalance(owner, entryFee, false);
+                _updateRoundBalance(entryFee, true);
             }
 
             playerMap[owner].isInfected = false;
@@ -258,7 +270,6 @@ contract Survive is  Withdrawable, Pausable, Refundable {
 
         return true;
     }
-
 
     //Player Events
     event playerAttemptInfectEvent(address owner);
@@ -272,4 +283,5 @@ contract Survive is  Withdrawable, Pausable, Refundable {
     //Game Events
     event gameSettledEvent(uint winners, uint prize, uint contractBalance);
     event gameResetEvent(uint timestamp);
+    event roundBalanceEvent(uint timestamp, uint total, uint added, bool add);
 }
