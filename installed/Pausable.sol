@@ -10,6 +10,11 @@ contract Pausable is Ownable {
         _;
     }
 
+    modifier isPaused() {
+        require(paused);
+        _;
+    }
+
     constructor() public {
         paused = false;
     }
@@ -24,7 +29,7 @@ contract Pausable is Ownable {
         return paused;
     }
 
-    function isPaused() public view returns (bool _paused) {
+    function getPauseState() public view returns (bool _paused) {
         return paused;
     }
 

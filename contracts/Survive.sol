@@ -39,6 +39,7 @@ contract Survive is  Withdrawable, Pausable, Refundable {
     }
 
     constructor(uint _entryFee, uint _cureFee, uint _killTime, uint _cooldown) public {
+
         entryFee = _entryFee;
         cureFee = _cureFee;
         cooldown = _cooldown;
@@ -104,6 +105,15 @@ contract Survive is  Withdrawable, Pausable, Refundable {
 
     function resetGame() public isNotPaused() isOwner() returns (bool _reset) {
         return reset();
+    }
+
+    function updateGameRules(uint _entryFee, uint _cureFee, uint _killTime, uint _cooldown) public isPaused() isOwner() returns (uint _retEntryFee, uint _retCureFee, uint _retRoundBalance, uint _retKillTime, uint _retCooldown) {
+        entryFee = _entryFee;
+        cureFee = _cureFee;
+        cooldown = _cooldown;
+        killTime = _killTime;
+
+        return getGameData();
     }
 
     //Game/Player Info
